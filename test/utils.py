@@ -222,18 +222,32 @@ def yolov8_postprocess(
 
 def draw_bbox(image, boxes, classes, scores, save_path, count):
 
-    for bbox, cl_name, score in zip(boxes, classes, scores):
-        l, t, r, b = (int(x) for x in bbox)
+    if not isinstance(classes, list) and not isinstance(classes, np.ndarray):
+        l, t, r, b = (int(x) for x in boxes)
 
         cv2.rectangle(image, (l, t), (r, b), (255, 0, 0), 2)
         cv2.putText(
             image,
-            f"{cl_name} id: {score}",
+            f"{classes} id: {scores:.2f}",
             (l, t - 6),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.6,
             (0, 0, 255),
             2,
         )
+    else:
+        for bbox, cl_name, score in zip(boxes, classes, scores):
+            l, t, r, b = (int(x) for x in bbox)
+
+            cv2.rectangle(image, (l, t), (r, b), (255, 0, 0), 2)
+            cv2.putText(
+                image,
+                f"{cl_name} id: {score:.2f}",
+                (l, t - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2,
+            )
     cv2.imwrite(os.path.join(save_path, f"output_{count}.jpg"), image)
     print(f"保存检测结果到 >> {os.path.join(save_path, f"output_{count}.jpg")}")

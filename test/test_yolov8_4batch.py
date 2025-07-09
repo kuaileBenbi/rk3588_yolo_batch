@@ -6,6 +6,8 @@ from rknnlite.api import RKNNLite
 from utils import letterbox, yolov8_postprocess, draw_bbox
 
 IMG_SIZE = 640
+RAW_W = 336
+RAW_H = 256
 
 core_map = {
     "NPU_CORE_0": RKNNLite.NPU_CORE_0,
@@ -18,9 +20,11 @@ core_map = {
 def draw(raw_batch, ltrb_boxes_batch, classes_id_batch, scores_batch, save_path):
     os.makedirs(save_path, exist_ok=True)
     count = 0
+
     for raw, ltrb_boxes, classes_id, scores in zip(
         raw_batch, ltrb_boxes_batch, classes_id_batch, scores_batch
     ):
+        # print(ltrb_boxes, classes_id, scores)
         draw_bbox(raw, ltrb_boxes, classes_id, scores, save_path, count)
         count += 1
 
@@ -43,30 +47,38 @@ def init_rknn(det_model, core_mask):
 
 
 def postprogress(infer_outputs, raw_shape, ratio, dw, dh):
-    img1_outputs = []
-    img2_outputs = []
-    img3_outputs = []
-    img4_outputs = []
 
-    ltrb_boxes_batch = []
-    classes_id_batch = []
-    scores_batch = []
+    batch = len(infer_outputs[0])
 
-    for _, header in enumerate(infer_outputs):
-        img1_outputs.append(np.expand_dims(header[0], axis=0))
-        img2_outputs.append(np.expand_dims(header[1], axis=0))
-        img3_outputs.append(np.expand_dims(header[2], axis=0))
-        img4_outputs.append(np.expand_dims(header[3], axis=0))
+    if batch > 1:
+        print(">> multi batch 推理！")
 
-    for outputs in [img1_outputs, img2_outputs, img3_outputs, img4_outputs]:
+        dis_outputs = [[] for _ in range(batch)]
+        ltrb_boxes_batch = [[] for _ in range(batch)]
+        classes_id_batch = [[] for _ in range(batch)]
+        scores_batch = [[] for _ in range(batch)]
+
+        for _, headers in enumerate(infer_outputs):
+            for b, header in enumerate(headers):
+                dis_outputs[b].append(np.expand_dims(header, axis=0))
+
+        for b, outputs in enumerate(dis_outputs):
+            ltrb_boxes, classes_id, scores = yolov8_postprocess(
+                outputs, raw_shape, ratio, dw, dh
+            )
+            ltrb_boxes_batch[b] = ltrb_boxes
+            classes_id_batch[b] = classes_id
+            scores_batch[b] = scores
+        return ltrb_boxes_batch, classes_id_batch, scores_batch
+
+    else:
+
+        print(">> single batc推理! ")
+
         ltrb_boxes, classes_id, scores = yolov8_postprocess(
-            outputs, raw_shape, ratio, dw, dh
+            infer_outputs, raw_shape, ratio, dw, dh
         )
-        ltrb_boxes_batch.append(ltrb_boxes)
-        classes_id_batch.append(classes_id)
-        scores_batch.append(scores)
-
-    return ltrb_boxes_batch, classes_id_batch, scores_batch
+        return ltrb_boxes, classes_id, scores
 
 
 def preprocess(raw_batch_path):
@@ -110,18 +122,22 @@ def inference_and_postprocess(img_batch, rknn_lite, raw_img_shape, ratio, dw, dh
     return ltrb_boxes, classes_id, scores
 
 
-def main(rknn_model_path, core_mask, raw_batch_path, save_path):
+def main(batch_num, rknn_model_path, core_mask, raw_batch_path, save_path):
 
+    # data文件夹内图像大小相同，否则需要返回ratio和dw/dh也为列表
     raw_batch, img_batch, ratio, (dw, dh) = preprocess(raw_batch_path)
 
-    print(">> 准备推理...")
+    raw_batch = raw_batch[:batch_num]
+    img_batch = img_batch[:batch_num]
+
+    print(f">> 准备推理...batch={batch_num}")
 
     rknn_lite = init_rknn(rknn_model_path, core_mask)
 
     print(">> 开始推理...")
-    print(raw_batch[0].shape)
+
     ltrb_boxes, classes_id, scores = inference_and_postprocess(
-        img_batch, rknn_lite, raw_batch[0].shape, ratio, dw, dh
+        img_batch, rknn_lite, (RAW_H, RAW_W), ratio, dw, dh
     )
 
     print(">> 完成推理")
@@ -139,12 +155,16 @@ if __name__ == "__main__":
         core_mask = sys.argv[2]
         raw_batch_path = sys.argv[3]
         save_path = sys.argv[4]
+        batch_num = int(sys.argv[5])
     else:
-        rknn_model_path = "/home/firefly/Desktop/tracker-methods/creative/yolo_batch/test/rknnModel/yolov8n_4batch.rknn"
+        rknn_model_path = "/home/firefly/Desktop/tracker-methods/creative/yolo_batch/test/rknnModel/yolov8s_3batch.rknn"
         core_mask = "NPU_CORE_012"
         raw_batch_path = (
             "/home/firefly/Desktop/tracker-methods/creative/yolo_batch/test/data"
         )
-        save_path = "debug_output"
+        save_path = "/home/firefly/Desktop/tracker-methods/creative/yolo_batch/test/debug_output_yolov8s_3batch"
+        batch_num = 3
 
-    main(rknn_model_path, core_mask, raw_batch_path, save_path)
+    print("DEBUG sys.argv:", sys.argv)
+
+    main(batch_num, rknn_model_path, core_mask, raw_batch_path, save_path)
